@@ -73,7 +73,7 @@ class Part:
       rodDir = pr['rodDir']
 
       if len(shape) > 1:
-        self.rodLoc[rodOrientation].append(generateLocations((0, 0, 0), rodDir, len(shape)))
+        self.rodLoc[rodOrientation].extend(generateLocations((0, 0, 0), rodDir, len(shape)))
 
       for i in range(len(shape)):
         pos, neg = shape[i]
@@ -81,26 +81,77 @@ class Part:
         if pos != neg:
           stickDir = pr['stickDirs'][i % 2]
           refLoc = [rodDir[d] * i - stickDir[d] * neg for d in range(3)]
-          self.stickLoc[rodOrientation].append(generateLocations(refLoc, stickDir, pos + neg + 1))
+          self.stickLoc[rodOrientation].extend(generateLocations(refLoc, stickDir, pos + neg + 1))
 
 class Grid:
-  def addPart(self, part, position, lowestConnectedPart = -1):
-    part.pos = position
+  def __init__(self, size):
+    self.size = size
+    self.centerLoc = [size // 2] * 3
+    self.cells = [[[[-1, -1] for i in range(size)]  for i in range(size)] for i in range(size)]
+
+    self.numRodCells = 0
+    self.numStickCells = 0
+    self.numFilledCells = 0
+
+  def _getCell(self, loc):
+    return self.cells[loc[0]][loc[1]][loc[2]]
+
+  # Sets or clears the part from the grid
+  def _togglePart(self, part, pos, newVal, oldVal):
+    for deltaLoc in part.rodLoc[pos.orientation]:
+      print(self.centerLoc, pos.location, deltaLoc)
+      p = [self.centerLoc[i] + pos.location[i] + deltaLoc[i] for i in range(3)]
+      cell = self._getCell(p)
+      print(p, cell)
+      assert cell[0] == oldVal
+      cell[0] = newVal
+
+      if oldVal == -1:
+        self.numRodCells += 1
+        if cell[1] != -1:
+          self.numFilledCells += 1
+      else:
+        self.numRodCells -= 1
+        if cell[1] != -1:
+          self.numFilledCells -= 1
+
+    for deltaLoc in part.stickLoc[pos.orientation]:
+      print(self.centerLoc, pos.location, deltaLoc)
+      p = [self.centerLoc[i] + pos.location[i] + deltaLoc[i] for i in range(3)]
+      cell = self._getCell(p)
+      print(p, cell)
+      assert cell[1] == oldVal
+      cell[1] = newVal
+
+      if oldVal == -1:
+        self.numStickCells += 1
+        if cell[0] != -1:
+          self.numFilledCells += 1
+      else:
+        self.numStickCells -= 1
+        if cell[0] != -1:
+          self.numFilledCells -= 1
+
+  def addPart(self, part, pos, lowestConnectedPart = -1):
+    part.pos = pos
     part.lowestConnectedPart = lowestConnectedPart
 
-    # TODO
+    self._togglePart(part, pos, part.index, -1)
 
   def removePart(self, part):
     del part.pos
     del part.lowestConnectedPart
 
-    # TODO
+    self._togglePart(part, pos, -1, part.index)
 
   def getPositions(self, part, fromPart):
     # TODO
 
     return []
-    
+
+  def __str__(self):
+    return "#rodCells = %d, #stickCells = %d, #filledCells = %d" \
+      % (self.numRodCells, self.numStickCells, self.numFilledCells)
 
 def makeParts(numbers, shapes):
   parts = []
@@ -136,10 +187,11 @@ def solve(partNumber):
         grid.removePart(part, pos)
 
 parts = makeParts(pineApplePilePartNumbers, pineApplePileShapes)
-grid = Grid()
+grid = Grid(8)
 
 grid.addPart(parts[0], Position(Orientation.X, (0, 0, 0)))
+print(grid)
 
-solve(1) 
+#solve(1)
 
 
