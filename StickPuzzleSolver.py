@@ -152,7 +152,7 @@ class Grid:
   def _visitCells(self, shape, pos, callback):
     for unitType in UnitType:
       for cell in shape.cells[pos.orientation][unitType.value]:
-        print(pos.location, cell.location)
+        #print(pos.location, cell.location)
         loc = [pos.location[i] + cell.location[i] for i in range(3)]
         gridCell = self.getCell(loc)
         if (not gridCell) or callback(gridCell, unitType, cell.orientation):
@@ -223,7 +223,7 @@ class Grid:
     )
 
   def __str__(self):
-    return "#rodCells = %d, #stickCells = %d, #filledCells = %d" % (
+    return "<Grid #rodCells = %d, #stickCells = %d, #filledCells = %d>" % (
       self.numCells[UnitType.Rod.value],
       self.numCells[UnitType.Stick.value],
       self.numFilledCells
@@ -253,9 +253,9 @@ class Solver:
       print("Solved!")
       return True
 
-    if self.grid.numFilledCells + sum(self.grid.numCells) > self.totalCells:
+    if sum(self.grid.numCells) - self.grid.numFilledCells > self.totalCells:
       # Too many partial cells remaining to fill them all
-      print("Stuck 1")
+      #print("Stuck 1")
       return True
 
     if self.grid.numFilledCells == self.grid.numCells[0]:
@@ -274,10 +274,11 @@ class Solver:
           break
     return partialCellLoc
 
-  def _fillPartialCell(self, partialCellLoc):
+  def _fillPartialCell(self, partialCellLoc, level):
     cell = self.grid.getCell(partialCellLoc)
     unitType = UnitType.Rod if cell.parts[UnitType.Rod.value] else UnitType.Stick
-    print("_fillPartialCell", partialCellLoc, unitType, str(cell))
+    #print("_fillPartialCell", partialCellLoc, unitType, str(cell))
+    print("%d. %s" % (level, self.grid))
 
     lastShape = None
     for i, part in enumerate(self.parts):
@@ -292,22 +293,22 @@ class Solver:
         # Find all (relative) positions of the puzzle part that fit the given unit
         relPositions = part.shape.findPositionsFitting(unitType, cell.orientation)
         for relPos in relPositions:
-          print("Part %d @ %s" % (i, relPos))
           pos = Position(relPos.orientation, [partialCellLoc[i] + relPos.location[i] for i in range(3)])
-          if False and self.grid.doesPartFit(part, pos):
+          if self.grid.doesPartFit(part, pos):
+            #print("%sPart %d @ %s" % ("  " * level, i, relPos))
             self.grid.addPart(part, pos)
-            self.solve()
+            self._solve(level + 1)
             self.grid.removePart(part)
 
-  def _solve(self):
+  def _solve(self, level = 1):
     if self._shouldBacktrack():
       return
 
     partialCellLoc = self._findCellToFill()
     assert partialCellLoc
-    print(partialCellLoc)
+    #print(partialCellLoc)
 
-    self._fillPartialCell(partialCellLoc)
+    self._fillPartialCell(partialCellLoc, level)
 
   def solve(self):
     self.grid.addPart(self.parts[0], Position(Orientation.X, [self.grid.size // 2] * 3))
