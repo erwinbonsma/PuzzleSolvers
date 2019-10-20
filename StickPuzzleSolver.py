@@ -69,6 +69,8 @@ class Part:
     self.rodCells = {}
     self.stickCells = {}
 
+    self.pos = None
+
     for rodOrientation in Orientation:
       self.rodCells[rodOrientation] = []
       self.stickCells[rodOrientation] = []
@@ -113,21 +115,21 @@ class Grid:
   # Visits all cells that the part covers. For each cell, it invokes the callback.
   #
   # The callback can abort the visit by returning True. If it does so, this method returns
-  # the cell where the visit was aborted. Otherwise it returns None.
+  # the grid position where the visit was aborted. Otherwise it returns None.
   def _visitCells(self, part, pos, callback):
     for rodCell in part.rodCells[pos.orientation]:
       print(self.centerLoc, pos.location, rodCell.location)
       p = [self.centerLoc[i] + pos.location[i] + rodCell.location[i] for i in range(3)]
       cell = self._getCell(p)
       if callback(cell, PartType.Rod, rodCell.orientation):
-        return cell
+        return p
 
     for stickCell in part.stickCells[pos.orientation]:
       print(self.centerLoc, pos.location, stickCell.location)
       p = [self.centerLoc[i] + pos.location[i] + stickCell.location[i] for i in range(3)]
       cell = self._getCell(p)
       if callback(cell, PartType.Stick, stickCell.orientation):
-        return cell
+        return p
 
     return None
 
@@ -167,12 +169,29 @@ class Grid:
       part, part.pos,
       lambda cell, partType, stickOrientation: self._clearCell(cell, partType, stickOrientation, part)
     )
-    del part.pos
+    part.pos = None
 
-  def doesPartFit(self, part, pos, lowestConnectedPart):
+  def _findPartialCell(self, cell, partType):
+    # Abort if the complimentary part is not yet set
+    return not cell.parts[1 - partType.value]
+
+  def findPartialCell(self, part):
     return self._visitCells(
+      part, part.pos,
+      lambda cell, partType, stickOrientation: self._findPartialCell(cell, partType)
+    )
+
+  def _checkCell(self, cell, partType, stickOrientation):
+    if cell.parts[partType.value]:
+      return True # Already filled, abort
+    if cell.orientation and cell.orientation != stickOrientation:
+      return True # Orientation mismatch, abort
+    return False # Do not abort
+
+  def doesPartFit(self, part, pos):
+    return not self._visitCells(
       part, pos,
-      lambda cell, contentsIndex: self._checkCell(cell, contentsIndex, lowestConnectedPart)
+      self._checkCell
     )
 
   def __str__(self):
@@ -182,41 +201,90 @@ class Grid:
       self.numFilledCells
     )
 
+class Solver:
+  def __init__(self, gridSize, parts):
+    self.grid = Grid(gridSize)
+    self.parts = parts
+    self.totalCells = self._countPartCells()
+    print("totalCells =", self.totalCells)
+
+  def _countPartCells(self):
+    numRodCells = 0
+    numStickCells = 0
+
+    for part in self.parts:
+      numRodCells += len(part.rodCells[Orientation.X])
+      numStickCells += len(part.stickCells[Orientation.X])
+      print(numRodCells, numStickCells)
+
+    assert numRodCells == numStickCells
+    return numRodCells
+
+  def _shouldBacktrack(self):
+    if self.grid.numFilledCells == self.totalCells:
+      print("Solved!")
+      return True
+
+    if self.grid.numFilledCells + sum(self.grid.numCells) > self.totalCells:
+      # Too many partial cells remaining to fill them all
+      print("Stuck 1")
+      return True
+
+    if self.grid.numFilledCells == self.grid.numCells[0]:
+      # The partial puzzle is fully connected so any final assembly will consist of multiple parts
+      print("Stuck 2")
+      return True
+
+    return False
+
+  def _findCellToFill(self):
+    partialCell = None
+    for part in self.parts:
+      if part.pos:
+        partialCell = self.grid.findPartialCell(part)
+        if partialCell:
+          break
+    return partialCell
+
+  def _fillPartialCell(self, partialCell):
+    for part in self.parts:
+      if not part.pos:
+        # Find all positions of part that fill the partially filled cell
+        positions = []
+        for pos in positions:
+          if self.grid.doesPartFit(part, pos):
+            self.grid.addPart(part, pos)
+            self.solve()
+            self.grid.removePart(part)
+
+  def _solve(self):
+    if self._shouldBacktrack():
+      return
+
+    partialCell = self._findCellToFill()
+    assert partialCell
+    print(partialCell)
+
+    self._fillPartialCell(partialCell)
+
+  def solve(self):
+    self.grid.addPart(self.parts[0], Position(Orientation.X, (0, 0, 0)))
+    print(self.grid)
+
+    self._solve()
+
 def makeParts(numbers, shapes):
   parts = []
-  numRodCells = 0
-  numStickCells = 0
   for shapeNum in range(len(numbers)):
     for p in range(numbers[shapeNum]):
       part = Part(shapes[shapeNum])
       part.index = len(parts)
       part.shapeNum = shapeNum
       parts.append(part)
-      numRodCells += len(part.rodCells[Orientation.X])
-      numStickCells += len(part.stickCells[Orientation.X])
-      print(numRodCells, numStickCells)
 
-  assert numRodCells == numStickCells
+  return parts
 
-  return parts, numRodCells
+parts = makeParts(pineApplePilePartNumbers, pineApplePileShapes)
 
-def solve():
-  if grid.numFilledCells == totalCells:
-    print("Solved!")
-    return
-
-  # TODO
-
-parts, totalCells = makeParts(pineApplePilePartNumbers, pineApplePileShapes)
-print("totalCells =", totalCells)
-
-grid = Grid(8)
-
-grid.addPart(parts[0], Position(Orientation.X, (0, 0, 0)))
-print(grid)
-grid.removePart(parts[0])
-print(grid)
-
-#solve(1)
-
-
+solver = Solver(8, parts)
+solver.solve()
