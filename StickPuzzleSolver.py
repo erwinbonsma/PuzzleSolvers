@@ -17,12 +17,16 @@ pineApplePileShapes = [
 ]
 
 # The number of parts of each shape
-pineApplePilePartNumbers = [2, 1, 2, 2, 1, 1]
+pineApplePilePartNumbers = [2, 1, 2, 2, 1, 1, 1]
 
 class Orientation(Enum):
   X = 0
   Y = 1
   Z = 2
+
+class PartType(Enum):
+  Rod = 0
+  Stick = 1
 
 @total_ordering
 class Position:
@@ -62,134 +66,155 @@ class Part:
   def __init__(self, shape):
     self.shape = shape
 
-    self.rodLoc = {}
-    self.stickLoc = {}
+    self.rodCells = {}
+    self.stickCells = {}
 
     for rodOrientation in Orientation:
-      self.rodLoc[rodOrientation] = []
-      self.stickLoc[rodOrientation] = []
+      self.rodCells[rodOrientation] = []
+      self.stickCells[rodOrientation] = []
 
       pr = partRotations[rodOrientation]
       rodDir = pr['rodDir']
 
       if len(shape) > 1:
-        self.rodLoc[rodOrientation].extend(generateLocations((0, 0, 0), rodDir, len(shape)))
+        i = 0
+        for loc in generateLocations((0, 0, 0), rodDir, len(shape)):
+          stickDir = pr['stickDirs'][i % 2]
+          self.rodCells[rodOrientation].append(Position(stickDir, loc))
+          i += 1
 
       for i in range(len(shape)):
         pos, neg = shape[i]
 
-        if pos != neg:
+        if pos + neg > 0:
           stickDir = pr['stickDirs'][i % 2]
           refLoc = [rodDir[d] * i - stickDir[d] * neg for d in range(3)]
-          self.stickLoc[rodOrientation].extend(generateLocations(refLoc, stickDir, pos + neg + 1))
+          self.stickCells[rodOrientation].extend(
+            [Position(stickDir, loc) for loc in generateLocations(refLoc, stickDir, pos + neg + 1)]
+          )
+
+class GridCell:
+  def __init__(self):
+    self.orientation = None
+    self.parts = [None, None]
 
 class Grid:
   def __init__(self, size):
     self.size = size
     self.centerLoc = [size // 2] * 3
-    self.cells = [[[[-1, -1] for i in range(size)]  for i in range(size)] for i in range(size)]
+    self.cells = [[[GridCell() for i in range(size)] for i in range(size)] for i in range(size)]
 
-    self.numRodCells = 0
-    self.numStickCells = 0
+    self.numCells = [0, 0]
     self.numFilledCells = 0
 
   def _getCell(self, loc):
     return self.cells[loc[0]][loc[1]][loc[2]]
 
-  # Sets or clears the part from the grid
-  def _togglePart(self, part, pos, newVal, oldVal):
-    for deltaLoc in part.rodLoc[pos.orientation]:
-      print(self.centerLoc, pos.location, deltaLoc)
-      p = [self.centerLoc[i] + pos.location[i] + deltaLoc[i] for i in range(3)]
+  # Visits all cells that the part covers. For each cell, it invokes the callback.
+  #
+  # The callback can abort the visit by returning True. If it does so, this method returns
+  # the cell where the visit was aborted. Otherwise it returns None.
+  def _visitCells(self, part, pos, callback):
+    for rodCell in part.rodCells[pos.orientation]:
+      print(self.centerLoc, pos.location, rodCell.location)
+      p = [self.centerLoc[i] + pos.location[i] + rodCell.location[i] for i in range(3)]
       cell = self._getCell(p)
-      print(p, cell)
-      assert cell[0] == oldVal
-      cell[0] = newVal
+      if callback(cell, PartType.Rod, rodCell.orientation):
+        return cell
 
-      if oldVal == -1:
-        self.numRodCells += 1
-        if cell[1] != -1:
-          self.numFilledCells += 1
-      else:
-        self.numRodCells -= 1
-        if cell[1] != -1:
-          self.numFilledCells -= 1
-
-    for deltaLoc in part.stickLoc[pos.orientation]:
-      print(self.centerLoc, pos.location, deltaLoc)
-      p = [self.centerLoc[i] + pos.location[i] + deltaLoc[i] for i in range(3)]
+    for stickCell in part.stickCells[pos.orientation]:
+      print(self.centerLoc, pos.location, stickCell.location)
+      p = [self.centerLoc[i] + pos.location[i] + stickCell.location[i] for i in range(3)]
       cell = self._getCell(p)
-      print(p, cell)
-      assert cell[1] == oldVal
-      cell[1] = newVal
+      if callback(cell, PartType.Stick, stickCell.orientation):
+        return cell
 
-      if oldVal == -1:
-        self.numStickCells += 1
-        if cell[0] != -1:
-          self.numFilledCells += 1
-      else:
-        self.numStickCells -= 1
-        if cell[0] != -1:
-          self.numFilledCells -= 1
+    return None
 
-  def addPart(self, part, pos, lowestConnectedPart = -1):
+  def _setCell(self, cell, partType, stickOrientation, part):
+    assert not cell.parts[partType.value]
+
+    cell.parts[partType.value] = part
+    self.numCells[partType.value] += 1
+
+    if cell.orientation:
+      assert cell.orientation == stickOrientation
+      self.numFilledCells += 1
+    else:
+      cell.orientation = stickOrientation
+
+  def addPart(self, part, pos):
+    self._visitCells(
+      part, pos,
+      lambda cell, partType, stickOrientation: self._setCell(cell, partType, stickOrientation, part)
+    )
     part.pos = pos
-    part.lowestConnectedPart = lowestConnectedPart
 
-    self._togglePart(part, pos, part.index, -1)
+  def _clearCell(self, cell, partType, stickOrientation, part):
+    assert cell.parts[partType.value] == part
+    assert cell.orientation == stickOrientation
+
+    cell.parts[partType.value] = None
+    self.numCells[partType.value] -= 1
+
+    if cell.parts[1 - partType.value]:
+      self.numFilledCells -= 1
+    else:
+      cell.orientation = None
 
   def removePart(self, part):
+    self._visitCells(
+      part, part.pos,
+      lambda cell, partType, stickOrientation: self._clearCell(cell, partType, stickOrientation, part)
+    )
     del part.pos
-    del part.lowestConnectedPart
 
-    self._togglePart(part, pos, -1, part.index)
-
-  def getPositions(self, part, fromPart):
-    # TODO
-
-    return []
+  def doesPartFit(self, part, pos, lowestConnectedPart):
+    return self._visitCells(
+      part, pos,
+      lambda cell, contentsIndex: self._checkCell(cell, contentsIndex, lowestConnectedPart)
+    )
 
   def __str__(self):
-    return "#rodCells = %d, #stickCells = %d, #filledCells = %d" \
-      % (self.numRodCells, self.numStickCells, self.numFilledCells)
+    return "#rodCells = %d, #stickCells = %d, #filledCells = %d" % (
+      self.numCells[PartType.Rod.value],
+      self.numCells[PartType.Stick.value],
+      self.numFilledCells
+    )
 
 def makeParts(numbers, shapes):
   parts = []
+  numRodCells = 0
+  numStickCells = 0
   for shapeNum in range(len(numbers)):
     for p in range(numbers[shapeNum]):
       part = Part(shapes[shapeNum])
       part.index = len(parts)
       part.shapeNum = shapeNum
       parts.append(part)
+      numRodCells += len(part.rodCells[Orientation.X])
+      numStickCells += len(part.stickCells[Orientation.X])
+      print(numRodCells, numStickCells)
 
-  return parts
+  assert numRodCells == numStickCells
 
-def solve(partNumber):
-  if partNumber == len(parts):
+  return parts, numRodCells
+
+def solve():
+  if grid.numFilledCells == totalCells:
     print("Solved!")
     return
 
-  part = parts[partNumber]
+  # TODO
 
-  sameShape = parts[partNumber].shape == parts[partNumber - 1].shape
-  if sameShape:
-    startAtPartNumber = parts[partNumber - 1].lowestConnectedPart
-  else:
-    startAtPartNumber = 0
+parts, totalCells = makeParts(pineApplePilePartNumbers, pineApplePileShapes)
+print("totalCells =", totalCells)
 
-  for fromPartNumber in range(startAtPartNumber, partNumber):
-    positions = grid.getPositions(part, parts[fromPartNumber])
-
-    for pos in positions:
-      if not sameShape or pos > parts[partNumber - 1].pos:
-        grid.addPart(part, pos, fromPartNumber)
-        solve(partNumber + 1)
-        grid.removePart(part, pos)
-
-parts = makeParts(pineApplePilePartNumbers, pineApplePileShapes)
 grid = Grid(8)
 
 grid.addPart(parts[0], Position(Orientation.X, (0, 0, 0)))
+print(grid)
+grid.removePart(parts[0])
 print(grid)
 
 #solve(1)
