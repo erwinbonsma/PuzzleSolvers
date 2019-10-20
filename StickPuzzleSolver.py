@@ -59,8 +59,8 @@ partRotations = {
   }
 }
 
-def generateLocations(loc, dir, length):
-  return [(loc[0] + dir[0] * i, loc[1] + dir[1] * i, loc[2] + dir[2] * i) for i in range(length)]
+def generateLocations(vloc, vdir, vlen):
+  return [(vloc[0] + vdir[0] * i, vloc[1] + vdir[1] * i, vloc[2] + vdir[2] * i) for i in range(vlen)]
 
 class Part:
   def __init__(self, shape):
@@ -276,15 +276,12 @@ class Solver:
 def makeParts(numbers, shapes):
   parts = []
   for shapeNum in range(len(numbers)):
-    for p in range(numbers[shapeNum]):
-      part = Part(shapes[shapeNum])
-      part.index = len(parts)
-      part.shapeNum = shapeNum
-      parts.append(part)
+    for _ in range(numbers[shapeNum]):
+      parts.append(Part(shapes[shapeNum]))
 
   return parts
 
-parts = makeParts(pineApplePilePartNumbers, pineApplePileShapes)
+pineApplePileParts = makeParts(pineApplePilePartNumbers, pineApplePileShapes)
 
-solver = Solver(8, parts)
+solver = Solver(8, pineApplePileParts)
 solver.solve()
