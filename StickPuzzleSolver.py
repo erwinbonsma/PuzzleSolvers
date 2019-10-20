@@ -24,7 +24,7 @@ class Orientation(Enum):
   Y = 1
   Z = 2
 
-class PartType(Enum):
+class UnitType(Enum):
   Rod = 0
   Stick = 1
 
@@ -62,104 +62,129 @@ partRotations = {
 def generateLocations(vloc, vdir, vlen):
   return [(vloc[0] + vdir[0] * i, vloc[1] + vdir[1] * i, vloc[2] + vdir[2] * i) for i in range(vlen)]
 
+def orientationOfVector(v):
+  return Orientation.X if v[0] else Orientation.Y if v[1] else Orientation.Z
+
 class Part:
   def __init__(self, shape):
     self.shape = shape
 
-    self.rodCells = {}
-    self.stickCells = {}
+    self.cells = {}
 
     self.pos = None
 
     for rodOrientation in Orientation:
-      self.rodCells[rodOrientation] = []
-      self.stickCells[rodOrientation] = []
+      self.cells[rodOrientation] = [[], []]
+      cells = self.cells[rodOrientation]
 
       pr = partRotations[rodOrientation]
       rodDir = pr['rodDir']
 
       if len(shape) > 1:
-        i = 0
-        for loc in generateLocations((0, 0, 0), rodDir, len(shape)):
+        for i, loc in enumerate(generateLocations((0, 0, 0), rodDir, len(shape))):
           stickDir = pr['stickDirs'][i % 2]
-          self.rodCells[rodOrientation].append(Position(stickDir, loc))
-          i += 1
+          stickOrientation = orientationOfVector(stickDir)
+          cells[UnitType.Rod.value].append(Position(stickOrientation, loc))
 
       for i in range(len(shape)):
         pos, neg = shape[i]
 
         if pos + neg > 0:
           stickDir = pr['stickDirs'][i % 2]
+          stickOrientation = orientationOfVector(stickDir)
           refLoc = [rodDir[d] * i - stickDir[d] * neg for d in range(3)]
-          self.stickCells[rodOrientation].extend(
-            [Position(stickDir, loc) for loc in generateLocations(refLoc, stickDir, pos + neg + 1)]
+          cells[UnitType.Stick.value].extend(
+            [Position(stickOrientation, loc) for loc in generateLocations(refLoc, stickDir, pos + neg + 1)]
           )
+
+  def findPositionsFitting(self, otherUnitType, stickOrientation):
+    myUnitType = UnitType.Rod if otherUnitType == UnitType.Stick else UnitType.Stick
+    positions = []
+
+    for rodOrientation in Orientation:
+      for pos in self.cells[rodOrientation][myUnitType.value]:
+        if pos.orientation == stickOrientation:
+          # Found a match.
+          relPos = Position(rodOrientation, [-pos.location[i] for i in range(3)])
+          positions.append(relPos)
+
+    return positions
 
 class GridCell:
   def __init__(self):
     self.orientation = None
     self.parts = [None, None]
 
+  def __str__(self):
+    if self.parts[UnitType.Rod.value]:
+      if self.parts[UnitType.Stick.value]:
+        return "<GridCell: Filled (%s)>" % (str(self.orientation))
+      else:
+        return "<GridCell: Rod (%s)>" % (str(self.orientation))
+    else:
+      if self.parts[UnitType.Stick.value]:
+        return "<GridCell: Stick (%s)>" % (str(self.orientation))
+      else:
+        return "<GridCell: Empty>"
+
 class Grid:
   def __init__(self, size):
     self.size = size
-    self.centerLoc = [size // 2] * 3
+    #self.centerLoc = [size // 2] * 3
     self.cells = [[[GridCell() for i in range(size)] for i in range(size)] for i in range(size)]
 
     self.numCells = [0, 0]
     self.numFilledCells = 0
 
-  def _getCell(self, loc):
-    return self.cells[loc[0]][loc[1]][loc[2]]
+  def getCell(self, loc):
+    if min(loc) < 0 or max(loc) >= self.size:
+      return None
+    else:
+      return self.cells[loc[0]][loc[1]][loc[2]]
 
   # Visits all cells that the part covers. For each cell, it invokes the callback.
   #
   # The callback can abort the visit by returning True. If it does so, this method returns
-  # the grid position where the visit was aborted. Otherwise it returns None.
+  # the grid location where the visit was aborted. Otherwise it returns None.
   def _visitCells(self, part, pos, callback):
-    for rodCell in part.rodCells[pos.orientation]:
-      print(self.centerLoc, pos.location, rodCell.location)
-      p = [self.centerLoc[i] + pos.location[i] + rodCell.location[i] for i in range(3)]
-      cell = self._getCell(p)
-      if callback(cell, PartType.Rod, rodCell.orientation):
-        return p
-
-    for stickCell in part.stickCells[pos.orientation]:
-      print(self.centerLoc, pos.location, stickCell.location)
-      p = [self.centerLoc[i] + pos.location[i] + stickCell.location[i] for i in range(3)]
-      cell = self._getCell(p)
-      if callback(cell, PartType.Stick, stickCell.orientation):
-        return p
+    for unitType in UnitType:
+      for cell in part.cells[pos.orientation][unitType.value]:
+        print(pos.location, cell.location)
+        loc = [pos.location[i] + cell.location[i] for i in range(3)]
+        gridCell = self.getCell(loc)
+        if (not gridCell) or callback(gridCell, unitType, cell.orientation):
+          return loc
 
     return None
 
-  def _setCell(self, cell, partType, stickOrientation, part):
-    assert not cell.parts[partType.value]
+  def _setCell(self, cell, unitType, stickOrientation, part):
+    assert not cell.parts[unitType.value]
 
-    cell.parts[partType.value] = part
-    self.numCells[partType.value] += 1
+    cell.parts[unitType.value] = part
+    self.numCells[unitType.value] += 1
 
     if cell.orientation:
       assert cell.orientation == stickOrientation
       self.numFilledCells += 1
     else:
+      assert stickOrientation
       cell.orientation = stickOrientation
 
   def addPart(self, part, pos):
     self._visitCells(
       part, pos,
-      lambda cell, partType, stickOrientation: self._setCell(cell, partType, stickOrientation, part)
+      lambda cell, unitType, stickOrientation: self._setCell(cell, unitType, stickOrientation, part)
     )
     part.pos = pos
 
-  def _clearCell(self, cell, partType, stickOrientation, part):
-    assert cell.parts[partType.value] == part
+  def _clearCell(self, cell, unitType, stickOrientation, part):
+    assert cell.parts[unitType.value] == part
     assert cell.orientation == stickOrientation
 
-    cell.parts[partType.value] = None
-    self.numCells[partType.value] -= 1
+    cell.parts[unitType.value] = None
+    self.numCells[unitType.value] -= 1
 
-    if cell.parts[1 - partType.value]:
+    if cell.parts[1 - unitType.value]:
       self.numFilledCells -= 1
     else:
       cell.orientation = None
@@ -167,22 +192,22 @@ class Grid:
   def removePart(self, part):
     self._visitCells(
       part, part.pos,
-      lambda cell, partType, stickOrientation: self._clearCell(cell, partType, stickOrientation, part)
+      lambda cell, unitType, stickOrientation: self._clearCell(cell, unitType, stickOrientation, part)
     )
     part.pos = None
 
-  def _findPartialCell(self, cell, partType):
+  def _findPartialCell(self, cell, unitType):
     # Abort if the complimentary part is not yet set
-    return not cell.parts[1 - partType.value]
+    return not cell.parts[1 - unitType.value]
 
   def findPartialCell(self, part):
     return self._visitCells(
       part, part.pos,
-      lambda cell, partType, stickOrientation: self._findPartialCell(cell, partType)
+      lambda cell, unitType, stickOrientation: self._findPartialCell(cell, unitType)
     )
 
-  def _checkCell(self, cell, partType, stickOrientation):
-    if cell.parts[partType.value]:
+  def _checkCell(self, cell, unitType, stickOrientation):
+    if cell.parts[unitType.value]:
       return True # Already filled, abort
     if cell.orientation and cell.orientation != stickOrientation:
       return True # Orientation mismatch, abort
@@ -196,8 +221,8 @@ class Grid:
 
   def __str__(self):
     return "#rodCells = %d, #stickCells = %d, #filledCells = %d" % (
-      self.numCells[PartType.Rod.value],
-      self.numCells[PartType.Stick.value],
+      self.numCells[UnitType.Rod.value],
+      self.numCells[UnitType.Stick.value],
       self.numFilledCells
     )
 
@@ -213,8 +238,8 @@ class Solver:
     numStickCells = 0
 
     for part in self.parts:
-      numRodCells += len(part.rodCells[Orientation.X])
-      numStickCells += len(part.stickCells[Orientation.X])
+      numRodCells += len(part.cells[Orientation.X][UnitType.Rod.value])
+      numStickCells += len(part.cells[Orientation.X][UnitType.Stick.value])
       print(numRodCells, numStickCells)
 
     assert numRodCells == numStickCells
@@ -238,21 +263,27 @@ class Solver:
     return False
 
   def _findCellToFill(self):
-    partialCell = None
+    partialCellLoc = None
     for part in self.parts:
       if part.pos:
-        partialCell = self.grid.findPartialCell(part)
-        if partialCell:
+        partialCellLoc = self.grid.findPartialCell(part)
+        if partialCellLoc:
           break
-    return partialCell
+    return partialCellLoc
 
-  def _fillPartialCell(self, partialCell):
+  def _fillPartialCell(self, partialCellLoc):
+    cell = self.grid.getCell(partialCellLoc)
+    unitType = UnitType.Rod if cell.parts[UnitType.Rod.value] else UnitType.Stick
+    print("_fillPartialCell", partialCellLoc, unitType, str(cell))
+
     for part in self.parts:
       if not part.pos:
-        # Find all positions of part that fill the partially filled cell
-        positions = []
-        for pos in positions:
-          if self.grid.doesPartFit(part, pos):
+        # Find all (relative) positions of the puzzle part that fit the given unit
+        relPositions = part.findPositionsFitting(unitType, cell.orientation)
+        print(relPositions)
+        for relPos in relPositions:
+          pos = Position(relPos.orientation, [partialCellLoc[i] + relPos.location[i] for i in range(3)])
+          if False and self.grid.doesPartFit(part, pos):
             self.grid.addPart(part, pos)
             self.solve()
             self.grid.removePart(part)
@@ -261,14 +292,14 @@ class Solver:
     if self._shouldBacktrack():
       return
 
-    partialCell = self._findCellToFill()
-    assert partialCell
-    print(partialCell)
+    partialCellLoc = self._findCellToFill()
+    assert partialCellLoc
+    print(partialCellLoc)
 
-    self._fillPartialCell(partialCell)
+    self._fillPartialCell(partialCellLoc)
 
   def solve(self):
-    self.grid.addPart(self.parts[0], Position(Orientation.X, (0, 0, 0)))
+    self.grid.addPart(self.parts[0], Position(Orientation.X, [self.grid.size // 2] * 3))
     print(self.grid)
 
     self._solve()
