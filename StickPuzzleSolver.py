@@ -43,6 +43,9 @@ class Position:
   def __lt__(self, other):
     return ((self.orientation, self.location) < (other.orientation, other.location))
 
+  def __str__(self):
+    return "%s @ %s" % (self.location, self.orientation)
+
 # Table that defines how the rod and its sticks extend for the various orientations
 partRotations = {
   Orientation.X: {
@@ -65,13 +68,9 @@ def generateLocations(vloc, vdir, vlen):
 def orientationOfVector(v):
   return Orientation.X if v[0] else Orientation.Y if v[1] else Orientation.Z
 
-class Part:
-  def __init__(self, shape):
-    self.shape = shape
-
+class Shape:
+  def __init__(self, shapeDefinition):
     self.cells = {}
-
-    self.pos = None
 
     for rodOrientation in Orientation:
       self.cells[rodOrientation] = [[], []]
@@ -80,15 +79,14 @@ class Part:
       pr = partRotations[rodOrientation]
       rodDir = pr['rodDir']
 
-      if len(shape) > 1:
-        for i, loc in enumerate(generateLocations((0, 0, 0), rodDir, len(shape))):
+      if len(shapeDefinition) > 1:
+        for i, loc in enumerate(generateLocations((0, 0, 0), rodDir, len(shapeDefinition))):
           stickDir = pr['stickDirs'][i % 2]
           stickOrientation = orientationOfVector(stickDir)
           cells[UnitType.Rod.value].append(Position(stickOrientation, loc))
 
-      for i in range(len(shape)):
-        pos, neg = shape[i]
-
+      for i, stickExtension in enumerate(shapeDefinition):
+        pos, neg = stickExtension
         if pos + neg > 0:
           stickDir = pr['stickDirs'][i % 2]
           stickOrientation = orientationOfVector(stickDir)
@@ -110,6 +108,11 @@ class Part:
 
     return positions
 
+class Part:
+  def __init__(self, shape):
+    self.shape = shape
+    self.pos = None
+
 class GridCell:
   def __init__(self):
     self.orientation = None
@@ -130,7 +133,6 @@ class GridCell:
 class Grid:
   def __init__(self, size):
     self.size = size
-    #self.centerLoc = [size // 2] * 3
     self.cells = [[[GridCell() for i in range(size)] for i in range(size)] for i in range(size)]
 
     self.numCells = [0, 0]
@@ -142,13 +144,14 @@ class Grid:
     else:
       return self.cells[loc[0]][loc[1]][loc[2]]
 
-  # Visits all cells that the part covers. For each cell, it invokes the callback.
+  # Visits all grid cells that the shape covers when located and oriented as specified by "pos".
+  # For each cell (and unit type) the callback is invoked.
   #
   # The callback can abort the visit by returning True. If it does so, this method returns
   # the grid location where the visit was aborted. Otherwise it returns None.
-  def _visitCells(self, part, pos, callback):
+  def _visitCells(self, shape, pos, callback):
     for unitType in UnitType:
-      for cell in part.cells[pos.orientation][unitType.value]:
+      for cell in shape.cells[pos.orientation][unitType.value]:
         print(pos.location, cell.location)
         loc = [pos.location[i] + cell.location[i] for i in range(3)]
         gridCell = self.getCell(loc)
@@ -172,7 +175,7 @@ class Grid:
 
   def addPart(self, part, pos):
     self._visitCells(
-      part, pos,
+      part.shape, pos,
       lambda cell, unitType, stickOrientation: self._setCell(cell, unitType, stickOrientation, part)
     )
     part.pos = pos
@@ -191,7 +194,7 @@ class Grid:
 
   def removePart(self, part):
     self._visitCells(
-      part, part.pos,
+      part.shape, part.pos,
       lambda cell, unitType, stickOrientation: self._clearCell(cell, unitType, stickOrientation, part)
     )
     part.pos = None
@@ -202,7 +205,7 @@ class Grid:
 
   def findPartialCell(self, part):
     return self._visitCells(
-      part, part.pos,
+      part.shape, part.pos,
       lambda cell, unitType, stickOrientation: self._findPartialCell(cell, unitType)
     )
 
@@ -215,7 +218,7 @@ class Grid:
 
   def doesPartFit(self, part, pos):
     return not self._visitCells(
-      part, pos,
+      part.shape, pos,
       self._checkCell
     )
 
@@ -238,9 +241,9 @@ class Solver:
     numStickCells = 0
 
     for part in self.parts:
-      numRodCells += len(part.cells[Orientation.X][UnitType.Rod.value])
-      numStickCells += len(part.cells[Orientation.X][UnitType.Stick.value])
-      print(numRodCells, numStickCells)
+      shapeCells = part.shape.cells[Orientation.X] # Any of the orientations will do
+      numRodCells += len(shapeCells[UnitType.Rod.value])
+      numStickCells += len(shapeCells[UnitType.Stick.value])
 
     assert numRodCells == numStickCells
     return numRodCells
@@ -276,12 +279,20 @@ class Solver:
     unitType = UnitType.Rod if cell.parts[UnitType.Rod.value] else UnitType.Stick
     print("_fillPartialCell", partialCellLoc, unitType, str(cell))
 
-    for part in self.parts:
-      if not part.pos:
+    lastShape = None
+    for i, part in enumerate(self.parts):
+      if (
+        # Part is still available
+        not part.pos and
+        # It's a different shape
+        not part.shape is lastShape
+      ):
+        lastShape = part.shape
+
         # Find all (relative) positions of the puzzle part that fit the given unit
-        relPositions = part.findPositionsFitting(unitType, cell.orientation)
-        print(relPositions)
+        relPositions = part.shape.findPositionsFitting(unitType, cell.orientation)
         for relPos in relPositions:
+          print("Part %d @ %s" % (i, relPos))
           pos = Position(relPos.orientation, [partialCellLoc[i] + relPos.location[i] for i in range(3)])
           if False and self.grid.doesPartFit(part, pos):
             self.grid.addPart(part, pos)
@@ -304,15 +315,16 @@ class Solver:
 
     self._solve()
 
-def makeParts(numbers, shapes):
+def makeParts(shapeDefinitions, shapeCounts):
   parts = []
-  for shapeNum in range(len(numbers)):
-    for _ in range(numbers[shapeNum]):
-      parts.append(Part(shapes[shapeNum]))
+  for i, shapeDefinition in enumerate(shapeDefinitions):
+    shape = Shape(shapeDefinition)
+    for _ in range(shapeCounts[i]):
+      parts.append(Part(shape))
 
   return parts
 
-pineApplePileParts = makeParts(pineApplePilePartNumbers, pineApplePileShapes)
+pineApplePileParts = makeParts(pineApplePileShapes, pineApplePilePartNumbers)
 
 solver = Solver(8, pineApplePileParts)
 solver.solve()
