@@ -19,10 +19,24 @@ pineApplePileShapes = [
 # The number of parts of each shape
 pineApplePilePartNumbers = [2, 1, 2, 2, 1, 1, 1]
 
-class Orientation(Enum):
+class Axis(Enum):
   X = 0
   Y = 1
   Z = 2
+
+directionOfAxis = {
+  Axis.X: (1, 0, 0),
+  Axis.Y: (0, 1, 0),
+  Axis.Z: (0, 0, 1)
+}
+
+class Orientation(Enum):
+  PosX = 0
+  NegX = 1
+  PosY = 2
+  NegY = 3
+  PosZ = 4
+  NegZ = 5
 
 class UnitType(Enum):
   Rod = 0
@@ -30,6 +44,7 @@ class UnitType(Enum):
 
 @total_ordering
 class Position:
+  # Orientation can be of type Orientation (for rods and puzzle parts) or Axis (for sticks)
   def __init__(self, orientation, location):
     self.orientation = orientation
     self.location = location
@@ -47,16 +62,28 @@ class Position:
     return "%s @ %s" % (self.location, self.orientation)
 
 # Table that defines how the rod and its sticks extend for the various orientations
-partRotations = {
-  Orientation.X: {
+rodOrientations = {
+  Orientation.PosX: {
     'rodDir': (1, 0, 0),
     'stickDirs': [(0, 1, 0), (0, 0, 1)]
   },
-  Orientation.Y: {
+  Orientation.NegX: {
+    'rodDir': (-1, 0, 0),
+    'stickDirs': [(0, 0, 1), (0, 1, 0)]
+  },
+  Orientation.PosY: {
     'rodDir': (0, 1, 0),
     'stickDirs': [(0, 0, -1), (-1, 0, 0)]
   },
-  Orientation.Z: {
+  Orientation.NegY: {
+    'rodDir': (0, -1, 0),
+    'stickDirs': [(-1, 0, 0), (0, 0, -1)]
+  },
+  Orientation.PosZ: {
+    'rodDir': (0, 0, 1),
+    'stickDirs': [(0, -1, 0), (1, 0, 0)]
+  },
+  Orientation.NegZ: {
     'rodDir': (0, 0, -1),
     'stickDirs': [(1, 0, 0), (0, -1, 0)]
   }
@@ -65,52 +92,75 @@ partRotations = {
 def generateLocations(vloc, vdir, vlen):
   return [(vloc[0] + vdir[0] * i, vloc[1] + vdir[1] * i, vloc[2] + vdir[2] * i) for i in range(vlen)]
 
-def orientationOfVector(v):
-  return Orientation.X if v[0] else Orientation.Y if v[1] else Orientation.Z
+def axisOfVector(v):
+  return Axis.X if v[0] else Axis.Y if v[1] else Axis.Z
 
 class Shape:
   def __init__(self, shapeDefinition):
-    self.cells = {}
+    self.cellsByOrientation = {}
 
+    if len(shapeDefinition) > 1:
+      self._makeRodCells(shapeDefinition)
+    else:
+      self._makeStickCells(shapeDefinition[0][0] + 1)
+
+  def _makeRodCells(self, shapeDefinition):
     for rodOrientation in Orientation:
-      self.cells[rodOrientation] = [[], []]
-      cells = self.cells[rodOrientation]
+      cells = [[], []]
+      self.cellsByOrientation[rodOrientation] = cells
 
-      pr = partRotations[rodOrientation]
-      rodDir = pr['rodDir']
+      dirs = rodOrientations[rodOrientation]
+      rodDir = dirs['rodDir']
 
-      if len(shapeDefinition) > 1:
-        for i, loc in enumerate(generateLocations((0, 0, 0), rodDir, len(shapeDefinition))):
-          stickDir = pr['stickDirs'][i % 2]
-          stickOrientation = orientationOfVector(stickDir)
-          cells[UnitType.Rod.value].append(Position(stickOrientation, loc))
+      for i, loc in enumerate(generateLocations((0, 0, 0), rodDir, len(shapeDefinition))):
+        stickDir = dirs['stickDirs'][i % 2]
+        stickOrientation = axisOfVector(stickDir)
+        cells[UnitType.Rod.value].append(Position(stickOrientation, loc))
 
       for i, stickExtension in enumerate(shapeDefinition):
         pos, neg = stickExtension
         if pos + neg > 0:
-          stickDir = pr['stickDirs'][i % 2]
-          stickOrientation = orientationOfVector(stickDir)
+          stickDir = dirs['stickDirs'][i % 2]
+          stickOrientation = axisOfVector(stickDir)
           refLoc = [rodDir[d] * i - stickDir[d] * neg for d in range(3)]
           cells[UnitType.Stick.value].extend(
             [Position(stickOrientation, loc) for loc in generateLocations(refLoc, stickDir, pos + neg + 1)]
           )
 
+  def _makeStickCells(self, stickLen):
+    for stickOrientation in Axis:
+      cells = [[], []]
+      self.cellsByOrientation[stickOrientation] = cells
+
+      stickDir = directionOfAxis[stickOrientation]
+      cells[UnitType.Stick.value].extend(
+        [Position(stickOrientation, loc) for loc in generateLocations([0] * 3, stickDir, stickLen)]
+      )
+
   def findPositionsFitting(self, otherUnitType, stickOrientation):
     myUnitType = UnitType.Rod if otherUnitType == UnitType.Stick else UnitType.Stick
     positions = []
 
-    for rodOrientation in Orientation:
-      for pos in self.cells[rodOrientation][myUnitType.value]:
+    for orientation in self.cellsByOrientation:
+      for pos in self.cellsByOrientation[orientation][myUnitType.value]:
         if pos.orientation == stickOrientation:
           # Found a match.
-          relPos = Position(rodOrientation, [-pos.location[i] for i in range(3)])
+          relPos = Position(orientation, [-pos.location[i] for i in range(3)])
           positions.append(relPos)
 
     return positions
 
+  def dump(self):
+    for orientation in self.cellsByOrientation:
+      print(orientation)
+      cells = self.cellsByOrientation[orientation]
+      for unitType in UnitType:
+        print("%s: %s" % (unitType, [str(pos) for pos in cells[unitType.value]]))
+
 class Part:
-  def __init__(self, shape):
+  def __init__(self, shape, index):
     self.shape = shape
+    self.index = index
     self.pos = None
 
 class GridCell:
@@ -150,8 +200,9 @@ class Grid:
   # The callback can abort the visit by returning True. If it does so, this method returns
   # the grid location where the visit was aborted. Otherwise it returns None.
   def _visitCells(self, shape, pos, callback):
+    cells = shape.cellsByOrientation[pos.orientation]
     for unitType in UnitType:
-      for cell in shape.cells[pos.orientation][unitType.value]:
+      for cell in cells[unitType.value]:
         #print(pos.location, cell.location)
         loc = [pos.location[i] + cell.location[i] for i in range(3)]
         gridCell = self.getCell(loc)
@@ -229,6 +280,22 @@ class Grid:
       self.numFilledCells
     )
 
+  def dump(self):
+    for y in range(self.size):
+      for z in range(self.size):
+        lines = ["", ""]
+        for x in range(self.size):
+          cell = self.getCell([x, self.size - y - 1, self.size - z - 1])
+          for unitType in range(2):
+            if x > 0:
+              lines[unitType] += " "
+            if cell.parts[unitType]:
+              lines[unitType] += chr(65 + cell.parts[unitType].index + unitType * 32)
+            else:
+              lines[unitType] += "."
+        print(lines[0], "   ", lines[1])
+      print()
+
 class Solver:
   def __init__(self, gridSize, parts):
     self.grid = Grid(gridSize)
@@ -241,9 +308,11 @@ class Solver:
     numStickCells = 0
 
     for part in self.parts:
-      shapeCells = part.shape.cells[Orientation.X] # Any of the orientations will do
-      numRodCells += len(shapeCells[UnitType.Rod.value])
-      numStickCells += len(shapeCells[UnitType.Stick.value])
+      for orientation in part.shape.cellsByOrientation:
+        cells = part.shape.cellsByOrientation[orientation]
+        numRodCells += len(cells[UnitType.Rod.value])
+        numStickCells += len(cells[UnitType.Stick.value])
+        break # Only need to count cells in one orientation
 
     assert numRodCells == numStickCells
     return numRodCells
@@ -251,6 +320,7 @@ class Solver:
   def _shouldBacktrack(self):
     if self.grid.numFilledCells == self.totalCells:
       print("Solved!")
+      self.grid.dump()
       return True
 
     if sum(self.grid.numCells) - self.grid.numFilledCells > self.totalCells:
@@ -260,7 +330,7 @@ class Solver:
 
     if self.grid.numFilledCells == self.grid.numCells[0]:
       # The partial puzzle is fully connected so any final assembly will consist of multiple parts
-      print("Stuck 2")
+      #print("Stuck 2")
       return True
 
     return False
@@ -278,7 +348,13 @@ class Solver:
     cell = self.grid.getCell(partialCellLoc)
     unitType = UnitType.Rod if cell.parts[UnitType.Rod.value] else UnitType.Stick
     #print("_fillPartialCell", partialCellLoc, unitType, str(cell))
-    print("%d. %s" % (level, self.grid))
+    #if level > 7:
+    #  print("%d. %s" % (level, self.grid))
+
+    if self.grid.numFilledCells > self.bestNumFilled:
+      self.bestNumFilled = self.grid.numFilledCells
+      print("Best sofar =", self.bestNumFilled)
+      self.grid.dump()
 
     lastShape = None
     for i, part in enumerate(self.parts):
@@ -310,10 +386,12 @@ class Solver:
 
     self._fillPartialCell(partialCellLoc, level)
 
-  def solve(self):
-    self.grid.addPart(self.parts[0], Position(Orientation.X, [self.grid.size // 2] * 3))
-    print(self.grid)
+  def solve(self, firstPartPos = None):
+    if not firstPartPos:
+      firstPartPos = Position(Orientation.PosX, [self.grid.size // 2] * 3)
+    self.grid.addPart(self.parts[0], firstPartPos)
 
+    self.bestNumFilled = 0
     self._solve()
 
 def makeParts(shapeDefinitions, shapeCounts):
@@ -321,11 +399,22 @@ def makeParts(shapeDefinitions, shapeCounts):
   for i, shapeDefinition in enumerate(shapeDefinitions):
     shape = Shape(shapeDefinition)
     for _ in range(shapeCounts[i]):
-      parts.append(Part(shape))
+      parts.append(Part(shape, len(parts)))
 
   return parts
 
 pineApplePileParts = makeParts(pineApplePileShapes, pineApplePilePartNumbers)
 
-solver = Solver(8, pineApplePileParts)
-solver.solve()
+if False:
+  grid = Grid(4)
+  parts = pineApplePileParts
+  parts[7].shape.dump()
+
+  grid.addPart(parts[9], Position(Axis.Z, [1, 0, 1]))
+  grid.addPart(parts[3], Position(Orientation.PosX, [0, 0, 2]))
+  grid.addPart(parts[4], Position(Orientation.NegZ, [0, 1, 3]))
+  grid.addPart(parts[7], Position(Orientation.PosY, [1, 0, 3]))
+  grid.dump()
+
+solver = Solver(4, pineApplePileParts)
+solver.solve(Position(Orientation.PosX, [0, 2, 2]))
