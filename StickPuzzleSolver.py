@@ -1,3 +1,22 @@
+# (C) 2019, Erwin Bonsma
+#
+# This is a simple solver for some stick puzzles designed by Stewart Coffin.
+# It has been written to solve the "Too Hard" puzzle. The easier "Pine Apple
+# Pile" puzzle was used to test the solver.
+#
+# The difficulty with solving these puzzles (both manually as well as computer-
+# assisted) is that the sticks do not intersect the rods at an orthogonal
+# angle. This results in a distorted coordinate system where pieces cannot be
+# rotated as freely as would otherwise be possible. Also, when attempting a
+# manual solve, it adds a lot of confusion.
+#
+# An additional difficulty is that the assembled shape is not known. It is only
+# known that in the assembled state, all holes in the rod should be filled with
+# sticks.
+#
+# The solver only checks how the puzzle pieces can fit together. It does not
+# actually check if the solutions it generates can actually be assembled.
+
 from enum import Enum
 from functools import total_ordering
 
@@ -52,6 +71,7 @@ directionOfAxis = {
   Axis.Z: (0, 0, 1)
 }
 
+# Each rod can only be oriented in six possible ways.
 class Orientation(Enum):
   PosX = 0
   NegX = 1
@@ -60,6 +80,8 @@ class Orientation(Enum):
   PosZ = 4
   NegZ = 5
 
+# Each unit in the grid can be filled with (part of) a rod and (part of) a stick. During a solve it
+# may be filled with only one, but eventually each grid unit should be filled with both or neither.
 class UnitType(Enum):
   Rod = 0
   Stick = 1
@@ -328,7 +350,6 @@ class Solver:
     self.grid = Grid(gridSize)
     self.parts = parts
     self.totalCells = self._countPartCells()
-    print("totalCells =", self.totalCells)
 
   def _countPartCells(self):
     numRodCells = 0
@@ -352,12 +373,10 @@ class Solver:
 
     if sum(self.grid.numCells) - self.grid.numFilledCells > self.totalCells:
       # Too many partial cells remaining to fill them all
-      #print("Stuck 1")
       return True
 
     if self.grid.numFilledCells == self.grid.numCells[0]:
       # The partial puzzle is fully connected so any final assembly will consist of multiple parts
-      #print("Stuck 2")
       return True
 
     return False
@@ -373,14 +392,10 @@ class Solver:
   def _fillPartialCell(self, partialCellLoc, level):
     cell = self.grid.getCell(partialCellLoc)
     unitType = UnitType.Rod if cell.parts[UnitType.Rod.value] else UnitType.Stick
-    #print("_fillPartialCell", partialCellLoc, unitType, str(cell))
-    #if level > 7:
-    #  print("%d. %s" % (level, self.grid))
 
     if self.grid.numFilledCells > self.bestNumFilled:
       self.bestNumFilled = self.grid.numFilledCells
       print("Best sofar =", self.bestNumFilled)
-      self.grid.dump()
 
     lastShape = None
     for i, part in enumerate(self.parts):
@@ -397,7 +412,6 @@ class Solver:
         for relPos in relPositions:
           pos = Position(relPos.orientation, [partialCellLoc[i] + relPos.location[i] for i in range(3)])
           if self.grid.doesPartFit(part, pos):
-            #print("%sPart %d @ %s" % ("  " * level, i, relPos))
             self.grid.addPart(part, pos)
             self._solve(level + 1)
             self.grid.removePart(part)
@@ -408,13 +422,10 @@ class Solver:
 
     partialCellLoc = self._findCellToFill()
     assert partialCellLoc
-    #print(partialCellLoc)
 
     self._fillPartialCell(partialCellLoc, level)
 
-  def solve(self, firstPartPos = None):
-    if not firstPartPos:
-      firstPartPos = Position(Orientation.PosX, [self.grid.size // 2] * 3)
+  def solve(self, firstPartPos):
     self.grid.addPart(self.parts[0], firstPartPos)
 
     self.bestNumFilled = 0
@@ -432,20 +443,18 @@ def makeParts(shapeDefinitions, shapeCounts):
 pineApplePileParts = makeParts(pineApplePileShapes, pineApplePilePartNumbers)
 tooHardParts = makeParts(tooHardShapes, tooHardPartNumbers)
 
-if False:
-  grid = Grid(4)
-  parts = pineApplePileParts
-  parts[7].shape.dump()
+print("Solving Pine Apple Pile puzzle")
+solver = Solver(4, pineApplePileParts)
 
-  grid.addPart(parts[9], Position(Axis.Z, [1, 0, 1]))
-  grid.addPart(parts[3], Position(Orientation.PosX, [0, 0, 2]))
-  grid.addPart(parts[4], Position(Orientation.NegZ, [0, 1, 3]))
-  grid.addPart(parts[7], Position(Orientation.PosY, [1, 0, 3]))
-  grid.dump()
+# Note: Multiple y-values are in principle possible, but this one results in
+# a solution. Too shorten the duration of the solve, we are not iterating over
+# all possible values here.
+solver.solve(Position(Orientation.PosX, [0, 2, 2]))
 
-#solver = Solver(4, pineApplePileParts)
-#solver.solve(Position(Orientation.PosX, [0, 2, 2]))
+print("Solving Too Hard puzzle")
+solver = Solver(4, tooHardParts)
 
-for z in [1, 2]:
-  solver = Solver(4, tooHardParts)
-  solver.solve(Position(Orientation.PosX, [0, 1, z]))
+# Note: Multiple z-values are in principle possible, but this one results in
+# a solution. Too shorten the duration of the solve, we are not iterating over
+# all possible values here.
+solver.solve(Position(Orientation.PosX, [0, 1, 2]))
