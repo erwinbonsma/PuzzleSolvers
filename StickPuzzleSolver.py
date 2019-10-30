@@ -1,21 +1,6 @@
 # (C) 2019, Erwin Bonsma
 #
-# This is a simple solver for some stick puzzles designed by Stewart Coffin.
-# It has been written to solve the "Too Hard" puzzle. The easier "Pine Apple
-# Pile" puzzle was used to test the solver.
-#
-# The difficulty with solving these puzzles (both manually as well as computer-
-# assisted) is that the sticks do not intersect the rods at an orthogonal
-# angle. This results in a distorted coordinate system where pieces cannot be
-# rotated as freely as would otherwise be possible. Also, when attempting a
-# manual solve, it adds a lot of confusion.
-#
-# An additional difficulty is that the assembled shape is not known. It is only
-# known that in the assembled state, all holes in the rod should be filled with
-# sticks.
-#
-# The solver only checks how the puzzle pieces can fit together. It does not
-# actually check if the solutions it generates can actually be assembled.
+# This is a simple solver for angled stick puzzles.
 
 from enum import Enum
 from functools import total_ordering
@@ -25,7 +10,7 @@ class ShapeType(Enum):
   Stick = 1,
   RodShifted = 2
 
-pineApplePileShapes = [
+pineapplePileShapes = [
   # Rods of length 4
   [ShapeType.Rod, (0, 0), (1, 2), (0, 0), (0, 0)],
   [ShapeType.Rod, (0, 2), (0, 0), (0, 0), (0, 0)],
@@ -41,7 +26,7 @@ pineApplePileShapes = [
 ]
 
 # The number of parts of each shape
-pineApplePilePartNumbers = [2, 1, 2, 2, 1, 1, 1]
+pineapplePilePartNumbers = [2, 1, 2, 2, 1, 1, 1]
 
 tooHardShapes = [
   # Rods of length 4
@@ -440,11 +425,11 @@ def makeParts(shapeDefinitions, shapeCounts):
 
   return parts
 
-pineApplePileParts = makeParts(pineApplePileShapes, pineApplePilePartNumbers)
+pineapplePileParts = makeParts(pineapplePileShapes, pineapplePilePartNumbers)
 tooHardParts = makeParts(tooHardShapes, tooHardPartNumbers)
 
-print("Solving Pine Apple Pile puzzle")
-solver = Solver(4, pineApplePileParts)
+print("Solving Pineapple Pile puzzle")
+solver = Solver(4, pineapplePileParts)
 
 # Note: Multiple y-values are in principle possible, but this one results in
 # a solution. Too shorten the duration of the solve, we are not iterating over
