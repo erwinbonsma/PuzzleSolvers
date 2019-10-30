@@ -1,23 +1,45 @@
 from enum import Enum
 from functools import total_ordering
 
+class ShapeType(Enum):
+  Rod = 0,
+  Stick = 1,
+  RodShifted = 2
+
 pineApplePileShapes = [
   # Rods of length 4
-  [(0, 0), (1, 2), (0, 0), (0, 0)],
-  [(0, 2), (0, 0), (0, 0), (0, 0)],
+  [ShapeType.Rod, (0, 0), (1, 2), (0, 0), (0, 0)],
+  [ShapeType.Rod, (0, 2), (0, 0), (0, 0), (0, 0)],
 
   # Rods of length 3
-  [(2, 0), (0, 0), (0, 0)],
-  [(0, 0), (1, 1), (0, 0)],
-  [(0, 0), (0, 0), (3, 0)],
-  [(0, 0), (0, 0), (0, 0)],
+  [ShapeType.Rod, (2, 0), (0, 0), (0, 0)],
+  [ShapeType.Rod, (0, 0), (1, 1), (0, 0)],
+  [ShapeType.Rod, (0, 0), (0, 0), (3, 0)],
+  [ShapeType.Rod, (0, 0), (0, 0), (0, 0)],
 
   # Stick
-  [(2, 0)]
+  [ShapeType.Stick, 3]
 ]
 
 # The number of parts of each shape
 pineApplePilePartNumbers = [2, 1, 2, 2, 1, 1, 1]
+
+tooHardShapes = [
+  # Rods of length 4
+  [ShapeType.RodShifted, (0, 0), (2, 1), (0, 0), (0, 0)],
+  [ShapeType.Rod, (0, 0), (0, 0), (0, 0), (0, 0)],
+
+  # Rods of length 3
+  [ShapeType.Rod, (0, 0), (0, 0), (0, 2)],
+  [ShapeType.Rod, (0, 0), (1, 1), (0, 0)],
+  [ShapeType.Rod, (0, 0), (0, 0), (0, 0)],
+
+  # Sticks
+  [ShapeType.Stick, 4],
+  [ShapeType.Stick, 3]
+]
+
+tooHardPartNumbers = [2, 1, 2, 2, 2, 1, 2]
 
 class Axis(Enum):
   X = 0
@@ -99,12 +121,17 @@ class Shape:
   def __init__(self, shapeDefinition):
     self.cellsByOrientation = {}
 
-    if len(shapeDefinition) > 1:
-      self._makeRodCells(shapeDefinition)
+    shapeType = shapeDefinition[0]
+    if shapeType == ShapeType.Rod:
+      self._makeRodCells(shapeDefinition[1:])
+    elif shapeType == ShapeType.RodShifted:
+      self._makeRodCells(shapeDefinition[1:], 1)
+    elif shapeType == ShapeType.Stick:
+      self._makeStickCells(shapeDefinition[1])
     else:
-      self._makeStickCells(shapeDefinition[0][0] + 1)
+      assert False
 
-  def _makeRodCells(self, shapeDefinition):
+  def _makeRodCells(self, shapeDefinition, offset = 0):
     for rodOrientation in Orientation:
       cells = [[], []]
       self.cellsByOrientation[rodOrientation] = cells
@@ -113,14 +140,14 @@ class Shape:
       rodDir = dirs['rodDir']
 
       for i, loc in enumerate(generateLocations((0, 0, 0), rodDir, len(shapeDefinition))):
-        stickDir = dirs['stickDirs'][i % 2]
+        stickDir = dirs['stickDirs'][(i + offset) % 2]
         stickOrientation = axisOfVector(stickDir)
         cells[UnitType.Rod.value].append(Position(stickOrientation, loc))
 
       for i, stickExtension in enumerate(shapeDefinition):
         pos, neg = stickExtension
         if pos + neg > 0:
-          stickDir = dirs['stickDirs'][i % 2]
+          stickDir = dirs['stickDirs'][(i + offset) % 2]
           stickOrientation = axisOfVector(stickDir)
           refLoc = [rodDir[d] * i - stickDir[d] * neg for d in range(3)]
           cells[UnitType.Stick.value].extend(
@@ -336,13 +363,12 @@ class Solver:
     return False
 
   def _findCellToFill(self):
-    partialCellLoc = None
     for part in self.parts:
       if part.pos:
         partialCellLoc = self.grid.findPartialCell(part)
         if partialCellLoc:
-          break
-    return partialCellLoc
+          return partialCellLoc
+    return None
 
   def _fillPartialCell(self, partialCellLoc, level):
     cell = self.grid.getCell(partialCellLoc)
@@ -404,6 +430,7 @@ def makeParts(shapeDefinitions, shapeCounts):
   return parts
 
 pineApplePileParts = makeParts(pineApplePileShapes, pineApplePilePartNumbers)
+tooHardParts = makeParts(tooHardShapes, tooHardPartNumbers)
 
 if False:
   grid = Grid(4)
@@ -416,5 +443,9 @@ if False:
   grid.addPart(parts[7], Position(Orientation.PosY, [1, 0, 3]))
   grid.dump()
 
-solver = Solver(4, pineApplePileParts)
-solver.solve(Position(Orientation.PosX, [0, 2, 2]))
+#solver = Solver(4, pineApplePileParts)
+#solver.solve(Position(Orientation.PosX, [0, 2, 2]))
+
+for z in [1, 2]:
+  solver = Solver(4, tooHardParts)
+  solver.solve(Position(Orientation.PosX, [0, 1, z]))
