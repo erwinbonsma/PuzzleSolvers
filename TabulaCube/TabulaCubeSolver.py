@@ -5,23 +5,23 @@ PieceDef = namedtuple('PieceDef', ['blocks', 'strips'])
 
 # Piece definitions. Should be defined such that a shift_x is possible
 piece_defs = [
-	PieceDef([0, 1, 9, 18], [0, 16]),
-	PieceDef([0, 1, 5, 18], [0, 16]),
-	PieceDef([0, 1, 5, 20], [0, 17]),
-	PieceDef([1, 2, 20], [0, 17]),
-	PieceDef([0, 5, 23], [0, 15]),
-	PieceDef([1, 3, 20], [0, 17]),
-	PieceDef([1, 18], [0, 16]),
-	PieceDef([1, 18], [0, 16]),
-	PieceDef([1], [0, 16])
+	PieceDef([0, 3, 6, 15], [0, 16]),
+	PieceDef([0, 6, 15, 25], [0, 16]),
+	PieceDef([6, 15, 18, 25], [0, 17]),
+	PieceDef([15, 18, 24], [0, 17]),
+	PieceDef([0, 6, 25], [0, 16]),
+	PieceDef([7, 15, 18], [0, 17]),
+	PieceDef([0, 15], [0, 16]),
+	PieceDef([0, 15], [0, 16]),
+	PieceDef([15], [0, 16])
 ]
 
 class Block:
 	def __init__(self, id):
 		assert(id >= 0 and id < 27)
-		self.z = id % 3
-		self.x = (id // 3) % 3
-		self.y = (id // 9) % 3
+		self.x = id % 3
+		self.y = (id // 3) % 3
+		self.z = (id // 9) % 3
 
 	def shift_x(self):
 		self.x += 1
@@ -36,10 +36,10 @@ class Block:
 		self.z = 2 - self.z
 
 	def reorient(self):
-		self.x, self.y, self.z = self.z, 2 - self.x, 2 - self.y
+		self.x, self.y, self.z = self.z, self.x, self.y
 
 	def id(self):
-		return 9 * self.y + 3 * self.x + self.z
+		return self.x + 3 * self.y + 9 * self.z
 
 class Strip:
 	def __init__(self, id):
@@ -57,8 +57,6 @@ class Strip:
 		elif self.orientation == 2:
 			self.row -= 1
 			assert(self.row >= 0)
-		else:
-			assert(False)
 
 	def rotate_y(self):
 		if self.orientation == 0:
@@ -68,8 +66,6 @@ class Strip:
 		elif self.orientation == 2:
 			self.col = 1 - self.col
 			self.row = 2 - self.row
-		else:
-			assert(False)
 
 	def rotate_x(self):
 		if self.orientation == 0:
@@ -79,8 +75,6 @@ class Strip:
 			self.row = 2 - self.row
 		elif self.orientation == 2:
 			self.col = 1 - self.col
-		else:
-			assert(False)
 
 	def reorient(self):
 		self.orientation = (self.orientation + 1) % 3
@@ -111,38 +105,35 @@ def generate_orientations(piece_def):
 		))
 	return orientations
 
-def as_bitstring(piece_def):
-	bitstring = 0
+def to_bits(piece_def):
+	bits = 0
 	for part in piece_def.blocks:
-		bitstring |= 1 << part
+		bits |= 1 << part
 	for part in piece_def.strips:
-		bitstring |= 1 << (part + 27)
-	return bitstring
+		bits |= 1 << (part + 27)
+	return bits
 
 class Solver:
-
 	def __init__(self, piece_defs):
-		self.orientations = []
-		for piece_def in piece_defs:
-			piece_orientations = [piece_def] if len(self.orientations) == 0 \
-				else generate_orientations(piece_def)
-			print(piece_orientations)
-			self.orientations.append([as_bitstring(pd) for pd in piece_orientations])
-		print([[hex(pd) for pd in pds] for pds in self.orientations])
-		
-	def solve(self, combined = 0, pieces = []):
+		self.orientations = [
+			[to_bits(pd2) for pd2 in generate_orientations(pd)] for pd in piece_defs
+		]
+
+	def solve(self):
+		# Only consider two orientations for the first piece
+		for first_piece in self.orientations[0][0:2]:
+			self._solve(first_piece, [first_piece])
+
+	def _solve(self, combined, pieces):
 		if len(pieces) == len(self.orientations):
-			print("Solved", combined, pieces)
-			self.dump(combined, pieces)
+			self._dump(combined, pieces)
 			return
 		
-		#print(hex(combined), [hex(p) for p in pieces])
-		#self.dump(combined, pieces)
 		for piece in self.orientations[len(pieces)]:
 			if combined & piece == 0:
-				self.solve(combined | piece, pieces + [piece])
+				self._solve(combined | piece, pieces + [piece])
 
-	def dump(self, combined, pieces):
+	def _dump(self, combined, pieces):
 		for z in range(3):
 			line = ""
 			for y in range(3):
@@ -151,7 +142,7 @@ class Solver:
 				for x in range(3):
 					if len(line) > 0:
 						line += " "
-					id = 9 * y + 3 * x + z
+					id = x + 3 * (2 - y) + 9 * z
 					bit = (1 << id)
 					char = None
 					if combined & bit:
@@ -163,6 +154,7 @@ class Solver:
 						char = '_'
 					line += char  						
 			print(line)
+		print()
 
 solver = Solver(piece_defs)
 solver.solve()
