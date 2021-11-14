@@ -1,3 +1,7 @@
+# (C) 2021, Erwin Bonsma
+#
+# This is a simple solver for Yavuz Demirhan's Tabula Cube
+
 from collections import namedtuple
 import itertools
 
@@ -87,7 +91,7 @@ def generate_orientations(piece_def):
 	for i in range(24):
 		blocks = [Block(id) for id in piece_def.blocks]
 		strips = [Strip(id) for id in piece_def.strips]
-		
+
 		for part in itertools.chain(blocks, strips):
 			if i % 2 == 1:
 				part.shift_x()
@@ -128,7 +132,7 @@ class Solver:
 		if len(pieces) == len(self.orientations):
 			self._dump(combined, pieces)
 			return
-		
+
 		for piece in self.orientations[len(pieces)]:
 			if combined & piece == 0:
 				self._solve(combined | piece, pieces + [piece])
@@ -152,7 +156,7 @@ class Solver:
 								char = chr(ord('A') + i)
 					else:
 						char = '_'
-					line += char  						
+					line += char
 			print(line)
 		print()
 
